@@ -9,11 +9,11 @@ function Toggle({ id, label, checked, onToggle }) {
                 role="switch"
                 aria-checked={checked}
                 onClick={() => onToggle(!checked)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${checked ? 'bg-blue-600' : 'bg-slate-700'
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-neutral-500 focus:ring-offset-2 focus:ring-offset-black ${checked ? 'bg-white' : 'bg-neutral-700'
                     }`}
             >
                 <span
-                    className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-6' : 'translate-x-1'
+                    className={`inline-block h-4 w-4 rounded-full shadow transition-transform duration-200 ${checked ? 'translate-x-6 bg-black' : 'translate-x-1 bg-neutral-400'
                         }`}
                 />
             </button>
@@ -51,14 +51,14 @@ export default function FraudForm({ values, onChange, onToggle }) {
                     />
                 </div>
             </div>
-            <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-4 flex flex-col gap-3">
+            <div className="bg-neutral-900/50 rounded-lg border border-neutral-800 p-4 flex flex-col gap-3">
                 <Toggle
                     id="geoMismatch"
                     label="Geo Location Mismatch"
                     checked={values.geoMismatch}
                     onToggle={(v) => onToggle('geoMismatch', v)}
                 />
-                <div className="border-t border-slate-700" />
+                <div className="border-t border-neutral-800" />
                 <Toggle
                     id="deviceMismatch"
                     label="Device Fingerprint Mismatch"

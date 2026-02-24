@@ -1,8 +1,8 @@
 // ContextSelector.jsx – Decision context dropdown
 const CONTEXTS = [
-    { value: 'loan', label: '🏦  Loan Approval' },
-    { value: 'transaction', label: '💳  Transaction Authorization' },
-    { value: 'limit', label: '📈  Credit Limit Increase' },
+    { value: 'loan', label: 'Loan Approval' },
+    { value: 'transaction', label: 'Transaction Authorization' },
+    { value: 'limit', label: 'Credit Limit Increase' },
 ]
 
 export default function ContextSelector({ value, onChange }) {
@@ -18,12 +18,12 @@ export default function ContextSelector({ value, onChange }) {
                     className="input-field appearance-none cursor-pointer"
                 >
                     {CONTEXTS.map((c) => (
-                        <option key={c.value} value={c.value} className="bg-slate-800">
+                        <option key={c.value} value={c.value} className="bg-neutral-900">
                             {c.label}
                         </option>
                     ))}
                 </select>
-                <p className="text-xs text-slate-500 mt-1.5">
+                <p className="text-xs text-neutral-600 mt-1.5">
                     {value === 'loan' && 'Weights: 70% Credit · 30% Fraud'}
                     {value === 'transaction' && 'Weights: 40% Credit · 60% Fraud'}
                     {value === 'limit' && 'Weights: 50% Credit · 50% Fraud'}

@@ -1,27 +1,27 @@
 // ContributionPie.jsx – Recharts donut showing credit vs fraud contribution
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
-const COLORS = ['#3b82f6', '#f43f5e']
+const COLORS = ['#ffffff', '#525252']
 
 const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
         return (
-            <div className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm shadow-xl">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-lg px-4 py-2 text-sm shadow-xl">
                 <p className="font-semibold text-white">{payload[0].name}</p>
-                <p className="text-slate-300">{payload[0].value.toFixed(1)}%</p>
+                <p className="text-neutral-400">{payload[0].value.toFixed(1)}%</p>
             </div>
         )
     }
     return null
 }
 
-const CustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+const CustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
     const RADIAN = Math.PI / 180
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5
     const x = cx + radius * Math.cos(-midAngle * RADIAN)
     const y = cy + radius * Math.sin(-midAngle * RADIAN)
     return (
-        <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central"
+        <text x={x} y={y} fill={index === 0 ? '#000' : '#fff'} textAnchor="middle" dominantBaseline="central"
             fontSize={13} fontWeight={700} fontFamily="Inter, sans-serif">
             {`${(percent * 100).toFixed(0)}%`}
         </text>
@@ -55,7 +55,7 @@ export default function ContributionPie({ creditPct, fraudPct }) {
                 <Tooltip content={<CustomTooltip />} />
                 <Legend
                     formatter={(val) => (
-                        <span className="text-xs text-slate-300 font-medium">{val}</span>
+                        <span className="text-xs text-neutral-400 font-medium">{val}</span>
                     )}
                     iconType="circle"
                     iconSize={8}
