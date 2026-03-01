@@ -12,6 +12,23 @@ def load_and_preprocess(data_dir="D:/fraud_data", nrows=100000):
     print("Merging data...")
     train = pd.merge(train_transaction, train_identity, on='TransactionID', how='left')
     
+    # ── NEW: Feature Engineering ──────────────────────────────────────
+    print("Engineering new features...")
+    
+    # Time-based features from TransactionDT (seconds since reference)
+    train['Hour'] = (train['TransactionDT'] % 86400) // 3600
+    train['Day'] = train['TransactionDT'] // 86400
+    train['Is_Night'] = (train['Hour'].between(0, 6)).astype(int)
+    
+    # Log-transformed transaction amount
+    train['TransactionAmt_log'] = np.log1p(train['TransactionAmt'])
+    
+    # Card1 frequency: how many transactions per card
+    train['Card1_Transaction_Count'] = train.groupby('card1')['TransactionID'].transform('count')
+    
+    print(f"  Added 5 engineered features: Hour, Day, Is_Night, TransactionAmt_log, Card1_Transaction_Count")
+    # ──────────────────────────────────────────────────────────────────
+    
     print("Preprocessing categorical features...")
     # Get all categorical columns (object type)
     cat_cols = train.select_dtypes(include=['object']).columns
