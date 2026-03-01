@@ -25,7 +25,10 @@ export default function Home() {
                         <button onClick={() => navigate('/credit-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Credit Test</button>
                         <button onClick={() => navigate('/fusion-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fusion Test</button>
                         <button onClick={() => navigate('/model-data')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Model Data</button>
+                        <button onClick={() => navigate('/fusion-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fusion Test</button>
+                        <button onClick={() => navigate('/model-data')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Model Data</button>
                         <button onClick={() => navigate('/dashboard')} className="text-xs text-white bg-white/10 px-3 py-1.5 rounded-md font-medium">Dashboard</button>
+                        <button onClick={() => navigate('/demo')} className="text-xs text-black bg-white px-3 py-1.5 rounded-md font-bold ml-1">🎯 Demo</button>
                     </div>
                 </nav>
 
@@ -54,13 +57,21 @@ export default function Home() {
                     </p>
 
                     {/* CTAs */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                        <button
+                            id="demo-btn"
+                            onClick={() => navigate('/demo')}
+                            className="bg-white text-black font-bold text-base px-8 py-4 rounded-xl hover:bg-neutral-200 transition-colors flex items-center gap-2"
+                        >
+                            🎯 Bank Demo
+                            <span className="text-xs font-normal bg-black/10 px-2 py-0.5 rounded-full">20 profiles</span>
+                        </button>
                         <button
                             id="start-btn"
                             onClick={() => navigate('/dashboard')}
-                            className="btn-primary text-base px-8 py-4 group"
+                            className="btn-secondary text-base px-8 py-4 group"
                         >
-                            Start Evaluation
+                            Risk Dashboard
                             <span className="inline-block ml-2 transition-transform duration-200 group-hover:translate-x-1">→</span>
                         </button>
                         <button

@@ -15,13 +15,24 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "fraud_model", "fraud_xgboost.pkl")
-DATA_PATH = os.path.join(BASE_DIR, "fraud_model", "processed_train.csv")
-CONFUSION_IMG = os.path.join(BASE_DIR, "fraud_model", "confusion_matrix.png")
-
-CREDIT_MODEL_PATH = os.path.join(BASE_DIR, "credit_model", "credit_xgb_model.joblib")
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH    = os.path.join(BASE_DIR, "fraud_model",  "fraud_xgboost.pkl")
+DATA_PATH     = os.path.join(BASE_DIR, "fraud_model",  "processed_train.csv")
+CONFUSION_IMG = os.path.join(BASE_DIR, "fraud_model",  "confusion_matrix.png")
+CREDIT_MODEL_PATH    = os.path.join(BASE_DIR, "credit_model", "credit_xgb_model.joblib")
 CREDIT_PIPELINE_PATH = os.path.join(BASE_DIR, "credit_model", "preprocessing_pipeline.joblib")
+CUSTOMERS_PATH = os.path.join(BASE_DIR, "..", "data", "customers.csv")
+
+OCCUPATION_LABELS = {
+    0:"Laborers",1:"Core Staff",2:"Accountants",3:"Managers",4:"Drivers",
+    5:"Sales Staff",6:"Cleaning Staff",7:"Cooking Staff",8:"Private Service Staff",
+    9:"Medicine Staff",10:"Security Staff",11:"High Skill Tech Staff",
+    12:"Waiters/Barmen",13:"Low-Skill Laborers",14:"Realty Agents",
+    15:"Secretaries",16:"IT Staff",17:"HR Staff",
+}
+EDUCATION_LABELS  = {0:"Lower Secondary",1:"Secondary",2:"Incomplete Higher",3:"Higher Education",4:"Academic Degree"}
+FAMILY_LABELS     = {0:"Single",1:"Married",2:"Civil Marriage",3:"Widow",4:"Separated"}
+INCOME_TYPE_LABELS= {0:"Working",1:"State Servant",2:"Commercial Associate",3:"Pensioner",4:"Unemployed",5:"Student"}
 
 # ---------- helpers ----------
 def _load_joblib(path):
@@ -487,33 +498,208 @@ def predict_fusion():
     credit_df = pd.DataFrame([credit_row], columns=credit_feature_cols)
     credit_prob = float(credit_model.predict_proba(credit_df)[0][1])
 
-    # --- Fusion score ---
-    fusion_score = (fraud_prob * weights["fraud"]) + (credit_prob * weights["credit"])
+    # --- Loss-Aware Fusion ---
+    LGD         = 0.6
+    txn_amount  = float(data.get("TransactionAmt", 0) or 0)
+    loan_amount = float(data.get("AMT_CREDIT", 0) or 0)
+    fraud_risk  = fraud_prob * txn_amount
+    credit_risk = credit_prob * loan_amount * LGD
+    total_risk  = fraud_risk + credit_risk
+    exposure    = max(loan_amount + txn_amount, 1)
+    risk_ratio  = total_risk / exposure
 
-    # Decision tiers
-    if fusion_score >= 0.80:
-        decision, risk_level = "DECLINE", "Very High"
-    elif fusion_score >= 0.65:
-        decision, risk_level = "DECLINE", "High"
-    elif fusion_score >= 0.45:
-        decision, risk_level = "REVIEW", "Medium"
-    elif fusion_score >= 0.25:
-        decision, risk_level = "REVIEW", "Low-Medium"
-    else:
+    if risk_ratio < 0.10:
         decision, risk_level = "APPROVE", "Low"
+    elif risk_ratio < 0.25:
+        decision, risk_level = "REVIEW",  "Medium"
+    else:
+        decision, risk_level = "REJECT",  "High"
 
     return jsonify({
-        "fraud_probability":    round(fraud_prob, 6),
-        "fraud_percentage":     round(fraud_prob * 100, 2),
-        "credit_probability":   round(credit_prob, 6),
-        "credit_percentage":    round(credit_prob * 100, 2),
-        "fusion_score":         round(fusion_score, 6),
-        "fusion_percentage":    round(fusion_score * 100, 2),
-        "fraud_weight":         weights["fraud"],
-        "credit_weight":        weights["credit"],
-        "context":              context,
-        "decision":             decision,
-        "risk_level":           risk_level,
+        "fraud_probability":  round(fraud_prob, 6),
+        "fraud_percentage":   round(fraud_prob * 100, 2),
+        "credit_probability": round(credit_prob, 6),
+        "credit_percentage":  round(credit_prob * 100, 2),
+        "fraud_risk":         round(fraud_risk, 2),
+        "credit_risk":        round(credit_risk, 2),
+        "total_risk":         round(total_risk, 2),
+        "exposure":           round(exposure, 2),
+        "risk_ratio":         round(risk_ratio, 6),
+        "risk_ratio_pct":     round(risk_ratio * 100, 2),
+        "lgd":                LGD,
+        "txn_amount":         txn_amount,
+        "loan_amount":        loan_amount,
+        "context":            context,
+        "decision":           decision,
+        "risk_level":         risk_level,
+    })
+
+
+# ============================================================
+#  DEMO MODE ENDPOINTS  (Hackathon bank-product demo)
+# ============================================================
+
+def _load_customers():
+    path = os.path.normpath(CUSTOMERS_PATH)
+    return pd.read_csv(path)
+
+
+@app.route("/api/demo/customers", methods=["GET"])
+def demo_customers():
+    try:
+        df = _load_customers()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    customers = []
+    for _, r in df.iterrows():
+        ext_avg = round((float(r.ext_score_1) + float(r.ext_score_2) + float(r.ext_score_3)) / 3, 3)
+        customers.append({
+            "customer_id":        r.customer_id,
+            "name":               r["name"],
+            "account_number":     r.account_number,
+            "account_type":       r.account_type,
+            "bank_name":          r.bank_name,
+            "age":                int(r.age),
+            "gender":             "Male" if int(r.gender) == 1 else "Female",
+            "income":             float(r.income),
+            "loan_amount":        float(r.loan_amount),
+            "employment_years":   float(r.employment_years),
+            "education":          EDUCATION_LABELS.get(int(r.education), str(r.education)),
+            "family_status":      FAMILY_LABELS.get(int(r.family_status), str(r.family_status)),
+            "income_type":        INCOME_TYPE_LABELS.get(int(r.income_type), str(r.income_type)),
+            "occupation":         OCCUPATION_LABELS.get(int(r.occupation_type), str(r.occupation_type)),
+            "ext_score_avg":      ext_avg,
+            "bureau_max_overdue": int(r.bureau_max_overdue),
+            "late_installments":  int(r.late_installments),
+            "cc_utilization":     float(r.cc_utilization),
+            "last_transaction":   float(r.last_transaction_amt),
+            "risk_profile":       r.risk_profile,
+            "owns_car":           bool(int(r.owns_car)),
+            "owns_realty":        bool(int(r.owns_realty)),
+            "children":           int(r.children),
+        })
+    return jsonify(customers)
+
+
+@app.route("/api/demo/assess", methods=["POST"])
+def demo_assess():
+    if model is None or credit_model is None:
+        return jsonify({"error": "One or more models not loaded"}), 500
+
+    data        = request.get_json(force=True)
+    customer_id = data.get("customer_id")
+    context     = str(data.get("context", "loan")).lower()
+
+    try:
+        df  = _load_customers()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    rows = df[df["customer_id"] == customer_id]
+    if rows.empty:
+        return jsonify({"error": "Customer not found"}), 404
+    r = rows.iloc[0]
+
+    weights = FUSION_WEIGHTS.get(context, FUSION_WEIGHTS["loan"])
+
+    # ── Credit model features ─────────────────────────────
+    credit_map = {
+        "AMT_INCOME_TOTAL":        float(r.income),
+        "AMT_CREDIT":              float(r.loan_amount),
+        "AMT_ANNUITY":             float(r.annuity),
+        "AMT_GOODS_PRICE":         float(r.goods_price),
+        "AGE_YEARS":               float(r.age),
+        "EMPLOYED_YEARS":          float(r.employment_years),
+        "CODE_GENDER":             float(r.gender),
+        "FLAG_OWN_CAR":            float(r.owns_car),
+        "FLAG_OWN_REALTY":         float(r.owns_realty),
+        "CNT_CHILDREN":            float(r.children),
+        "CNT_FAM_MEMBERS":         float(r.family_members),
+        "NAME_EDUCATION_TYPE":     float(r.education),
+        "NAME_FAMILY_STATUS":      float(r.family_status),
+        "NAME_INCOME_TYPE":        float(r.income_type),
+        "OCCUPATION_TYPE":         float(r.occupation_type),
+        "DAYS_REGISTRATION":       float(r.days_registration),
+        "DAYS_ID_PUBLISH":         float(r.days_id_publish),
+        "EXT_SOURCE_1":            float(r.ext_score_1),
+        "EXT_SOURCE_2":            float(r.ext_score_2),
+        "EXT_SOURCE_3":            float(r.ext_score_3),
+        "bureau_num_loans":        float(r.bureau_loans),
+        "bureau_total_debt":       float(r.bureau_debt),
+        "bureau_total_credit":     float(r.bureau_credit),
+        "bureau_active_loan_count":float(r.bureau_active_loans),
+        "bureau_max_overdue":      float(r.bureau_max_overdue),
+        "prev_application_count":  float(r.prev_applications),
+        "prev_approved_count":     float(r.prev_approved),
+        "prev_refused_count":      float(r.prev_refused),
+        "prev_approval_rate":      float(r.approval_rate),
+        "installments_late_count": float(r.late_installments),
+        "installments_avg_delay":  float(r.avg_delay),
+        "installments_late_pct":   float(r.late_pct),
+        "cc_avg_balance":          float(r.cc_balance),
+        "cc_avg_utilization":      float(r.cc_utilization),
+        "cc_over_limit_count":     float(r.cc_over_limit),
+    }
+    credit_row = {f: np.nan for f in credit_feature_cols}
+    for k, v in credit_map.items():
+        if k in credit_row:
+            credit_row[k] = v
+    credit_df  = pd.DataFrame([credit_row], columns=credit_feature_cols)
+    credit_prob= float(credit_model.predict_proba(credit_df)[0][1])
+
+    # ── Fraud model features ──────────────────────────────
+    fraud_row = {f: -999 for f in feature_names}
+    fraud_map = {
+        "TransactionAmt": float(r.last_transaction_amt),
+        "card4":          float(r.card_brand),
+        "card6":          float(r.card_type),
+        "ProductCD":      float(r.product_code),
+        "DeviceType":     float(r.device_type),
+        "AMT_INCOME_TOTAL": float(r.income),   # some V-features correlate
+    }
+    for k, v in fraud_map.items():
+        if k in fraud_row:
+            fraud_row[k] = v
+    fraud_df  = pd.DataFrame([fraud_row], columns=feature_names)
+    fraud_prob= float(model.predict_proba(fraud_df)[0][1])
+
+    # ── Loss-Aware Fusion ─────────────────────────────────
+    LGD          = 0.6
+    txn_amount   = float(r.last_transaction_amt)
+    loan_amount  = float(r.loan_amount)
+    fraud_risk   = fraud_prob * txn_amount
+    credit_risk  = credit_prob * loan_amount * LGD
+    total_risk   = fraud_risk + credit_risk
+    exposure     = max(loan_amount + txn_amount, 1)
+    risk_ratio   = total_risk / exposure
+
+    if risk_ratio < 0.10:
+        decision, risk_level = "APPROVE", "Low"
+    elif risk_ratio < 0.25:
+        decision, risk_level = "REVIEW",  "Medium"
+    else:
+        decision, risk_level = "REJECT",  "High"
+
+    return jsonify({
+        "fraud_probability":  round(fraud_prob, 6),
+        "fraud_percentage":   round(fraud_prob * 100, 2),
+        "credit_probability": round(credit_prob, 6),
+        "credit_percentage":  round(credit_prob * 100, 2),
+        "fraud_risk":         round(fraud_risk, 2),
+        "credit_risk":        round(credit_risk, 2),
+        "total_risk":         round(total_risk, 2),
+        "exposure":           round(exposure, 2),
+        "risk_ratio":         round(risk_ratio, 6),
+        "risk_ratio_pct":     round(risk_ratio * 100, 2),
+        "lgd":                LGD,
+        "txn_amount":         txn_amount,
+        "loan_amount_used":   loan_amount,
+        "context":            context,
+        "decision":           decision,
+        "risk_level":         risk_level,
+        "risk_factors":       factors,
+        "customer_name":      r["name"],
     })
 
 
