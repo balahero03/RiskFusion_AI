@@ -45,6 +45,8 @@ export default function ModelData() {
                     <nav className="flex items-center gap-1">
                         <button onClick={() => navigate('/dashboard')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Dashboard</button>
                         <button onClick={() => navigate('/fraud-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fraud Test</button>
+                        <button onClick={() => navigate('/credit-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Credit Test</button>
+                        <button onClick={() => navigate('/fusion-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fusion Test</button>
                         <span className="text-xs text-white bg-white/10 px-3 py-1.5 rounded-md font-medium">Model Data</span>
                     </nav>
                 </header>
@@ -65,9 +67,15 @@ export default function ModelData() {
                             onClick={() => setTab('credit')}
                             className={`px-4 py-2 rounded-md text-xs font-semibold transition-colors ${tab === 'credit' ? 'bg-white text-black' : 'text-neutral-500 hover:text-white'}`}
                         >Credit Model</button>
+                        <button
+                            onClick={() => setTab('fusion')}
+                            className={`px-4 py-2 rounded-md text-xs font-semibold transition-colors ${tab === 'fusion' ? 'bg-white text-black' : 'text-neutral-500 hover:text-white'}`}
+                        >Fusion Engine</button>
                     </div>
 
-                    {tab === 'credit' ? (
+                    {tab === 'fusion' ? (
+                        <FusionModelPanel navigate={navigate} />
+                    ) : tab === 'credit' ? (
                         <CreditModelPanel navigate={navigate} />
                     ) : loadingInfo ? (
                         <div className="flex items-center justify-center py-20">
@@ -372,6 +380,110 @@ function CreditModelPanel({ navigate }) {
                             className="bg-white text-black font-semibold py-3 px-6 rounded-lg text-sm hover:bg-neutral-200 transition-colors w-full sm:w-auto"
                         >
                             Test Credit Model Live
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function FusionModelPanel({ navigate }) {
+    const WEIGHTS_TABLE = [
+        { label: 'Loan Approval', creditW: 70, fraudW: 30, key: 'loan' },
+        { label: 'Transaction Auth.', creditW: 40, fraudW: 60, key: 'transaction' },
+        { label: 'Credit Limit Increase', creditW: 50, fraudW: 50, key: 'limit' },
+    ]
+    const TIERS = [
+        { range: '0 – 25%', level: 'Low', decision: 'APPROVE', color: 'bg-emerald-500', text: 'text-emerald-400' },
+        { range: '25 – 45%', level: 'Low-Medium', decision: 'REVIEW', color: 'bg-yellow-500', text: 'text-yellow-400' },
+        { range: '45 – 65%', level: 'Medium', decision: 'REVIEW', color: 'bg-amber-500', text: 'text-amber-400' },
+        { range: '65 – 80%', level: 'High', decision: 'DECLINE', color: 'bg-red-400', text: 'text-red-400' },
+        { range: '80 – 100%', level: 'Very High', decision: 'DECLINE', color: 'bg-red-500', text: 'text-red-500' },
+    ]
+
+    return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div className="lg:col-span-1 flex flex-col gap-5">
+                {/* Weight Matrix */}
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Fusion Weight Matrix</p>
+                    <div className="space-y-3">
+                        {WEIGHTS_TABLE.map(w => (
+                            <div key={w.key} className="bg-neutral-900 rounded-lg p-3 border border-neutral-800">
+                                <p className="text-xs font-semibold text-neutral-300 mb-2">{w.label}</p>
+                                <div className="flex gap-0.5 h-1.5 rounded-full overflow-hidden mb-1.5">
+                                    <div className="rounded-l-full bg-white" style={{ width: `${w.creditW}%` }} />
+                                    <div className="rounded-r-full bg-neutral-600" style={{ width: `${w.fraudW}%` }} />
+                                </div>
+                                <div className="flex justify-between text-[10px] text-neutral-500">
+                                    <span className="text-neutral-400 font-medium">{w.creditW}% Credit</span>
+                                    <span>{w.fraudW}% Fraud</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Decision Tiers */}
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-3">Decision Tiers</p>
+                    <div className="space-y-2">
+                        {TIERS.map(t => (
+                            <div key={t.level} className="flex items-center justify-between bg-neutral-900/50 rounded-lg px-3 py-2 border border-neutral-800">
+                                <div className="flex items-center gap-2">
+                                    <span className={`w-2 h-2 rounded-full ${t.color}`} />
+                                    <span className={`text-xs font-semibold ${t.text}`}>{t.level}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] text-neutral-600">
+                                    <span>{t.range}</span>
+                                    <span className="text-neutral-700">→</span>
+                                    <span className="text-neutral-300 font-medium">{t.decision}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            <div className="lg:col-span-2">
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 h-full flex flex-col">
+                    <h3 className="text-lg font-bold text-white mb-2">RiskFusion Engine</h3>
+                    <p className="text-sm text-neutral-400 mb-6">
+                        The Fusion Engine is the core of RiskFusion AI. It simultaneously invokes two independent XGBoost models —
+                        Fraud Detection (431 features, IEEE CIS) and Credit Default Risk (146 features, Home Credit) — and combines
+                        their raw probabilities into a single <span className="text-white font-mono">Fusion Risk Score</span> using a
+                        context-driven weighted average.
+                    </p>
+
+                    <div className="grid sm:grid-cols-2 gap-4 mb-auto">
+                        <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4">
+                            <p className="text-xs font-bold text-neutral-500 uppercase mb-2">Formula</p>
+                            <code className="block bg-black rounded-lg px-4 py-3 text-xs text-emerald-400 font-mono leading-relaxed">
+                                fusion = fraud_prob × w_fraud<br />
+                                {'      '}+ credit_prob × w_credit
+                            </code>
+                            <p className="text-xs text-neutral-600 mt-3">
+                                Weights <code className="text-neutral-400">w_fraud</code> and <code className="text-neutral-400">w_credit</code> sum
+                                to 1.0 and vary by evaluation context.
+                            </p>
+                        </div>
+                        <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4">
+                            <p className="text-xs font-bold text-neutral-500 uppercase mb-2">Models Fused</p>
+                            <ul className="text-sm text-neutral-400 space-y-2 list-disc pl-4 marker:text-neutral-700">
+                                <li><span className="text-white">XGBoost Fraud</span> — 431 features, IEEE CIS dataset, 100K transactions</li>
+                                <li><span className="text-white">XGBoost Credit</span> — 146 features, Home Credit dataset, 307K applicants</li>
+                                <li>Unknown fields default to <code className="text-neutral-300">−999</code> (fraud) or <code className="text-neutral-300">NaN</code> (credit)</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div className="mt-8 border-t border-neutral-800 pt-6">
+                        <button
+                            onClick={() => navigate('/fusion-test')}
+                            className="bg-white text-black font-semibold py-3 px-6 rounded-lg text-sm hover:bg-neutral-200 transition-colors w-full sm:w-auto"
+                        >
+                            ⚡ Launch Fusion Test
                         </button>
                     </div>
                 </div>

@@ -21,43 +21,14 @@ const INITIAL_FRAUD = {
 }
 
 function getRiskLevel(score) {
-    if (score < 0.3) return 'Low'
-    if (score < 0.6) return 'Medium'
+    if (score < 0.25) return 'Low'
+    if (score < 0.45) return 'Low-Medium'
+    if (score < 0.65) return 'Medium'
+    if (score < 0.80) return 'High'
     return 'High'
 }
 function getDecision(level) {
-    return { Low: 'Approve', Medium: 'Review', High: 'Reject' }[level]
-}
-
-function computeCreditScore(credit) {
-    const income = Math.max(parseFloat(credit.income) || 0, 1)
-    const loanAmount = parseFloat(credit.loanAmount) || 0
-    const loanDuration = Math.max(parseFloat(credit.loanDuration) || 12, 1)
-    const age = parseFloat(credit.age) || 30
-    const employmentYears = parseFloat(credit.employmentYears) || 0
-    const existingLoans = parseFloat(credit.existingLoans) || 0
-
-    const monthlyPayment = loanAmount / loanDuration
-    const dti = Math.min(monthlyPayment / income, 1)
-    const dtiRisk = dti * 0.40
-    const empRisk = Math.max(0, 1 - employmentYears / 10) * 0.25
-    const debtRisk = Math.min(existingLoans / 5, 1) * 0.20
-    const ageFactor = (age < 25 || age > 60) ? 0.15 : age < 30 ? 0.07 : 0
-    const ageRisk = ageFactor * 0.15
-
-    return Math.min(1, Math.max(0, dtiRisk + empRisk + debtRisk + ageRisk))
-}
-
-function computeFraudScore(fraud) {
-    const amount = parseFloat(fraud.txAmount) || 0
-    const velocity = parseFloat(fraud.txVelocity) || 0
-    const amountRisk = Math.min(amount / 5000, 1) * 0.30
-    const velocityNorm = velocity <= 3 ? 0 : Math.min((velocity - 3) / 7, 1)
-    const velocityRisk = velocityNorm * 0.35
-    const geoRisk = fraud.geoMismatch ? 0.25 : 0
-    const deviceRisk = fraud.deviceMismatch ? 0.10 : 0
-
-    return Math.min(1, Math.max(0, amountRisk + velocityRisk + geoRisk + deviceRisk))
+    return { Low: 'Approve', 'Low-Medium': 'Review', Medium: 'Review', High: 'Reject' }[level] ?? 'Review'
 }
 
 export default function Dashboard() {
@@ -67,6 +38,7 @@ export default function Dashboard() {
     const [context, setContext] = useState('loan')
     const [errors, setErrors] = useState({})
     const [loading, setLoading] = useState(false)
+    const [apiError, setApiError] = useState(null)
 
     function handleCreditChange(id, val) {
         setCredit((prev) => ({ ...prev, [id]: val }))
@@ -81,7 +53,7 @@ export default function Dashboard() {
     }
 
     function validate() {
-        const required = ['income', 'loanAmount', 'loanDuration', 'age', 'employmentYears', 'existingLoans', 'txAmount', 'txVelocity']
+        const required = ['income', 'loanAmount', 'age', 'txAmount']
         const newErrors = {}
         required.forEach((k) => {
             const v = k in credit ? credit[k] : fraud[k]
@@ -91,33 +63,65 @@ export default function Dashboard() {
         return Object.keys(newErrors).length === 0
     }
 
-    function handleSubmit(e) {
+    async function handleSubmit(e) {
         e.preventDefault()
         if (!validate()) return
-
         setLoading(true)
-        setTimeout(() => {
-            const credit_score = computeCreditScore(credit)
-            const fraud_score = computeFraudScore(fraud)
+        setApiError(null)
+
+        try {
+            // Map simplified dashboard fields → real model feature names
+            const body = {
+                context,
+                // Credit model fields
+                AMT_INCOME_TOTAL: parseFloat(credit.income) || 0,
+                AMT_CREDIT: parseFloat(credit.loanAmount) || 0,
+                AMT_ANNUITY: credit.loanDuration
+                    ? parseFloat(credit.loanAmount) / parseFloat(credit.loanDuration)
+                    : undefined,
+                AGE_YEARS: parseFloat(credit.age) || 0,
+                EMPLOYED_YEARS: parseFloat(credit.employmentYears) || 0,
+                prev_application_count: parseFloat(credit.existingLoans) || 0,
+                // Fraud model fields
+                TransactionAmt: parseFloat(fraud.txAmount) || 0,
+                DeviceType: fraud.deviceMismatch ? 2 : 1,
+                addr2: fraud.geoMismatch ? 1 : 87,
+            }
+            // Remove undefined values
+            Object.keys(body).forEach(k => body[k] === undefined && delete body[k])
+
+            const res = await fetch('http://localhost:5000/api/fusion/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            })
+            const data = await res.json()
+            if (data.error) throw new Error(data.error)
+
+            const credit_score = data.credit_probability
+            const fraud_score = data.fraud_probability
+            const final_trust_score = data.fusion_score
             const w = WEIGHTS[context]
-            const final_trust_score = w.credit * credit_score + w.fraud * fraud_score
-            const credit_contribution = Math.round(w.credit * 100)
-            const fraud_contribution = Math.round(w.fraud * 100)
             const risk_level = getRiskLevel(final_trust_score)
             const decision = getDecision(risk_level)
 
-            setLoading(false)
             navigate('/result', {
                 state: {
                     credit_score, fraud_score, final_trust_score,
-                    credit_contribution, fraud_contribution,
+                    credit_contribution: Math.round(w.credit * 100),
+                    fraud_contribution: Math.round(w.fraud * 100),
                     risk_level, decision, context,
                 },
             })
-        }, 1200)
+        } catch (err) {
+            setApiError(err.message || 'Cannot reach backend. Is Flask running on port 5000?')
+        } finally {
+            setLoading(false)
+        }
     }
 
     const hasErrors = Object.values(errors).some(Boolean)
+
 
     return (
         <PageWrapper>
@@ -134,6 +138,8 @@ export default function Dashboard() {
                     </div>
                     <nav className="flex items-center gap-1">
                         <button onClick={() => navigate('/fraud-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fraud Test</button>
+                        <button onClick={() => navigate('/credit-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Credit Test</button>
+                        <button onClick={() => navigate('/fusion-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fusion Test</button>
                         <button onClick={() => navigate('/model-data')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Model Data</button>
                         <span className="text-xs text-white bg-white/10 px-3 py-1.5 rounded-md font-medium">Dashboard</span>
                     </nav>
@@ -159,6 +165,11 @@ export default function Dashboard() {
                                     {hasErrors && (
                                         <div className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5">
                                             Please fill in all required fields with valid numbers.
+                                        </div>
+                                    )}
+                                    {apiError && (
+                                        <div className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5">
+                                            {apiError}
                                         </div>
                                     )}
                                 </div>

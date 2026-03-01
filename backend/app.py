@@ -418,5 +418,105 @@ def predict_credit():
     })
 
 
+# ============================================================
+#  FUSION MODEL ENDPOINTS
+# ============================================================
+
+FUSION_WEIGHTS = {
+    "loan":        {"credit": 0.70, "fraud": 0.30},
+    "transaction": {"credit": 0.40, "fraud": 0.60},
+    "limit":       {"credit": 0.50, "fraud": 0.50},
+}
+
+
+@app.route("/api/fusion/model-info", methods=["GET"])
+def fusion_model_info():
+    return jsonify({
+        "contexts": [
+            {"key": "loan",        "label": "Loan Approval",        "credit_weight": 0.70, "fraud_weight": 0.30},
+            {"key": "transaction", "label": "Transaction Auth.",     "credit_weight": 0.40, "fraud_weight": 0.60},
+            {"key": "limit",       "label": "Credit Limit Increase", "credit_weight": 0.50, "fraud_weight": 0.50},
+        ],
+        "decision_tiers": [
+            {"range": "0 – 25%",   "level": "Low",        "decision": "APPROVE"},
+            {"range": "25 – 45%",  "level": "Low-Medium", "decision": "REVIEW"},
+            {"range": "45 – 65%",  "level": "Medium",     "decision": "REVIEW"},
+            {"range": "65 – 80%",  "level": "High",       "decision": "DECLINE"},
+            {"range": "80 – 100%", "level": "Very High",  "decision": "DECLINE"},
+        ],
+        "description": (
+            "RiskFusion combines the XGBoost Fraud Detection model (IEEE CIS, 431 features) "
+            "with the XGBoost Credit Default model (Home Credit, 146 features) into a single "
+            "weighted Fusion Risk Score. Weights are adjusted per evaluation context."
+        ),
+        "models_loaded": {
+            "fraud":  model is not None,
+            "credit": credit_model is not None,
+        },
+    })
+
+
+@app.route("/api/fusion/predict", methods=["POST"])
+def predict_fusion():
+    if model is None or credit_model is None:
+        return jsonify({"error": "One or more models not loaded"}), 500
+
+    data = request.get_json(force=True)
+    context = str(data.get("context", "loan")).lower()
+    weights = FUSION_WEIGHTS.get(context, FUSION_WEIGHTS["loan"])
+
+    # --- Fraud model ---
+    fraud_row = {f: -999 for f in feature_names}
+    for key, val in data.items():
+        if key in fraud_row:
+            try:
+                fraud_row[key] = float(val)
+            except (ValueError, TypeError):
+                fraud_row[key] = -999
+    fraud_df = pd.DataFrame([fraud_row], columns=feature_names)
+    fraud_prob = float(model.predict_proba(fraud_df)[0][1])
+
+    # --- Credit model ---
+    credit_row = {f: np.nan for f in credit_feature_cols}
+    for key, val in data.items():
+        if key in credit_row:
+            try:
+                credit_row[key] = float(val)
+            except (ValueError, TypeError):
+                credit_row[key] = np.nan
+    credit_df = pd.DataFrame([credit_row], columns=credit_feature_cols)
+    credit_prob = float(credit_model.predict_proba(credit_df)[0][1])
+
+    # --- Fusion score ---
+    fusion_score = (fraud_prob * weights["fraud"]) + (credit_prob * weights["credit"])
+
+    # Decision tiers
+    if fusion_score >= 0.80:
+        decision, risk_level = "DECLINE", "Very High"
+    elif fusion_score >= 0.65:
+        decision, risk_level = "DECLINE", "High"
+    elif fusion_score >= 0.45:
+        decision, risk_level = "REVIEW", "Medium"
+    elif fusion_score >= 0.25:
+        decision, risk_level = "REVIEW", "Low-Medium"
+    else:
+        decision, risk_level = "APPROVE", "Low"
+
+    return jsonify({
+        "fraud_probability":    round(fraud_prob, 6),
+        "fraud_percentage":     round(fraud_prob * 100, 2),
+        "credit_probability":   round(credit_prob, 6),
+        "credit_percentage":    round(credit_prob * 100, 2),
+        "fusion_score":         round(fusion_score, 6),
+        "fusion_percentage":    round(fusion_score * 100, 2),
+        "fraud_weight":         weights["fraud"],
+        "credit_weight":        weights["credit"],
+        "context":              context,
+        "decision":             decision,
+        "risk_level":           risk_level,
+    })
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+

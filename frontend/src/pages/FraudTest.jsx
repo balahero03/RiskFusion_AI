@@ -19,9 +19,9 @@ export default function FraudTest() {
             .then(data => {
                 setFields(data.ui_fields || [])
                 const init = {}
-                ;(data.ui_fields || []).forEach(f => {
-                    init[f.name] = f.type === 'select' ? (f.options?.[0]?.value ?? '') : ''
-                })
+                    ; (data.ui_fields || []).forEach(f => {
+                        init[f.name] = f.type === 'select' ? (f.options?.[0]?.value ?? '') : ''
+                    })
                 setValues(init)
                 setFetching(false)
             })
@@ -73,16 +73,16 @@ export default function FraudTest() {
 
     const riskColor = result
         ? result.risk_level === 'Low' ? 'text-emerald-400'
-        : result.risk_level === 'Low-Medium' ? 'text-yellow-400'
-        : result.risk_level === 'Medium' ? 'text-amber-400'
-        : result.risk_level === 'High' ? 'text-red-400'
-        : 'text-red-500'
+            : result.risk_level === 'Low-Medium' ? 'text-yellow-400'
+                : result.risk_level === 'Medium' ? 'text-amber-400'
+                    : result.risk_level === 'High' ? 'text-red-400'
+                        : 'text-red-500'
         : ''
 
     const decisionBg = result
         ? result.decision === 'APPROVE' ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-        : result.decision === 'REVIEW' ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
-        : 'bg-red-500/15 border-red-500/30 text-red-400'
+            : result.decision === 'REVIEW' ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                : 'bg-red-500/15 border-red-500/30 text-red-400'
         : ''
 
     return (
@@ -100,6 +100,8 @@ export default function FraudTest() {
                     </div>
                     <nav className="flex items-center gap-1">
                         <button onClick={() => navigate('/dashboard')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Dashboard</button>
+                        <button onClick={() => navigate('/credit-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Credit Test</button>
+                        <button onClick={() => navigate('/fusion-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fusion Test</button>
                         <button onClick={() => navigate('/model-data')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Model Data</button>
                         <span className="text-xs text-white bg-white/10 px-3 py-1.5 rounded-md font-medium">Fraud Test</span>
                     </nav>
@@ -188,11 +190,10 @@ export default function FraudTest() {
                                                     </p>
                                                     <div className="mt-2 bg-neutral-800 rounded-full h-1.5 overflow-hidden">
                                                         <div
-                                                            className={`h-full rounded-full transition-all duration-700 ${
-                                                                result.fraud_percentage > 50 ? 'bg-red-500' :
-                                                                result.fraud_percentage > 30 ? 'bg-amber-500' :
-                                                                result.fraud_percentage > 10 ? 'bg-yellow-500' : 'bg-emerald-500'
-                                                            }`}
+                                                            className={`h-full rounded-full transition-all duration-700 ${result.fraud_percentage > 50 ? 'bg-red-500' :
+                                                                    result.fraud_percentage > 30 ? 'bg-amber-500' :
+                                                                        result.fraud_percentage > 10 ? 'bg-yellow-500' : 'bg-emerald-500'
+                                                                }`}
                                                             style={{ width: `${Math.min(result.fraud_percentage, 100)}%` }}
                                                         />
                                                     </div>

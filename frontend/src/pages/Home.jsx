@@ -22,10 +22,13 @@ export default function Home() {
                     </div>
                     <div className="flex items-center gap-1">
                         <button onClick={() => navigate('/fraud-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fraud Test</button>
+                        <button onClick={() => navigate('/credit-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Credit Test</button>
+                        <button onClick={() => navigate('/fusion-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fusion Test</button>
                         <button onClick={() => navigate('/model-data')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Model Data</button>
                         <button onClick={() => navigate('/dashboard')} className="text-xs text-white bg-white/10 px-3 py-1.5 rounded-md font-medium">Dashboard</button>
                     </div>
                 </nav>
+
 
                 {/* Hero */}
                 <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 text-center">
