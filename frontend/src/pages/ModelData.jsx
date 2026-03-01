@@ -68,15 +68,7 @@ export default function ModelData() {
                     </div>
 
                     {tab === 'credit' ? (
-                        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 flex flex-col items-center justify-center">
-                            <div className="w-16 h-16 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-4">
-                                <svg className="w-7 h-7 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                            </div>
-                            <p className="text-neutral-400 font-semibold mb-1">Credit Model</p>
-                            <p className="text-neutral-600 text-sm text-center max-w-sm">No credit scoring model has been trained yet. This section will be available once the model is ready.</p>
-                        </div>
+                        <CreditModelPanel navigate={navigate} />
                     ) : loadingInfo ? (
                         <div className="flex items-center justify-center py-20">
                             <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />

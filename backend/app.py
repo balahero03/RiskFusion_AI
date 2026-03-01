@@ -1,12 +1,16 @@
 import os
-import json
-import joblib
+import pickle
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, confusion_matrix, accuracy_score
+
+try:
+    import joblib
+except ImportError:
+    joblib = None
 
 app = Flask(__name__)
 CORS(app)
@@ -16,20 +20,51 @@ MODEL_PATH = os.path.join(BASE_DIR, "fraud_model", "fraud_xgboost.pkl")
 DATA_PATH = os.path.join(BASE_DIR, "fraud_model", "processed_train.csv")
 CONFUSION_IMG = os.path.join(BASE_DIR, "fraud_model", "confusion_matrix.png")
 
-# Load model once at startup
+CREDIT_MODEL_PATH = os.path.join(BASE_DIR, "credit_model", "credit_xgb_model.joblib")
+CREDIT_PIPELINE_PATH = os.path.join(BASE_DIR, "credit_model", "preprocessing_pipeline.joblib")
+
+# ---------- helpers ----------
+def _load_joblib(path):
+    """Load a joblib/pickle file using whatever is available."""
+    if joblib is not None:
+        return joblib.load(path)
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+# ---------- Fraud model ----------
 model = None
 feature_names = []
 
 def load_model():
     global model, feature_names
     try:
-        model = joblib.load(MODEL_PATH)
+        model = _load_joblib(MODEL_PATH)
         feature_names = list(model.feature_names_in_)
-        print(f"Model loaded: {len(feature_names)} features")
+        print(f"Fraud model loaded: {len(feature_names)} features")
     except Exception as e:
-        print(f"Failed to load model: {e}")
+        print(f"Failed to load fraud model: {e}")
 
 load_model()
+
+# ---------- Credit model ----------
+credit_model = None
+credit_feature_cols = []
+credit_threshold = 0.69
+credit_metrics = {}
+
+def load_credit_model():
+    global credit_model, credit_feature_cols, credit_threshold, credit_metrics
+    try:
+        credit_model = _load_joblib(CREDIT_MODEL_PATH)
+        meta = _load_joblib(CREDIT_PIPELINE_PATH)
+        credit_feature_cols = list(meta.get("feature_cols", []))
+        credit_threshold = float(meta.get("best_threshold", 0.69))
+        credit_metrics = meta.get("metrics", {})
+        print(f"Credit model loaded: {len(credit_feature_cols)} features, threshold={credit_threshold}")
+    except Exception as e:
+        print(f"Failed to load credit model: {e}")
+
+load_credit_model()
 
 # Human-readable labels for key features
 FEATURE_LABELS = {
@@ -242,6 +277,145 @@ def get_confusion_matrix():
     if os.path.exists(CONFUSION_IMG):
         return send_file(CONFUSION_IMG, mimetype="image/png")
     return jsonify({"error": "Image not found"}), 404
+
+
+# ============================================================
+#  CREDIT MODEL ENDPOINTS
+# ============================================================
+
+CREDIT_UI_FIELDS = [
+    # --- Applicant ---
+    {"name": "NAME_CONTRACT_TYPE", "label": "Contract Type", "group": "Applicant", "type": "select",
+     "options": [{"value": 0, "label": "Cash Loans"}, {"value": 1, "label": "Revolving Loans"}]},
+    {"name": "CODE_GENDER", "label": "Gender", "group": "Applicant", "type": "select",
+     "options": [{"value": 0, "label": "Female"}, {"value": 1, "label": "Male"}]},
+    {"name": "FLAG_OWN_CAR", "label": "Owns a Car", "group": "Applicant", "type": "select",
+     "options": [{"value": 0, "label": "No"}, {"value": 1, "label": "Yes"}]},
+    {"name": "FLAG_OWN_REALTY", "label": "Owns Property", "group": "Applicant", "type": "select",
+     "options": [{"value": 0, "label": "No"}, {"value": 1, "label": "Yes"}]},
+    {"name": "CNT_CHILDREN", "label": "Number of Children", "group": "Applicant", "type": "number", "placeholder": "e.g. 0"},
+    {"name": "CNT_FAM_MEMBERS", "label": "Family Members", "group": "Applicant", "type": "number", "placeholder": "e.g. 2"},
+    {"name": "AGE_YEARS", "label": "Age (years)", "group": "Applicant", "type": "number", "placeholder": "e.g. 35"},
+    {"name": "NAME_EDUCATION_TYPE", "label": "Education Level", "group": "Applicant", "type": "select",
+     "options": [{"value": 0, "label": "Lower Secondary"}, {"value": 1, "label": "Secondary / Secondary Special"},
+                 {"value": 2, "label": "Incomplete Higher"}, {"value": 3, "label": "Higher Education"},
+                 {"value": 4, "label": "Academic Degree"}]},
+    {"name": "NAME_FAMILY_STATUS", "label": "Family Status", "group": "Applicant", "type": "select",
+     "options": [{"value": 0, "label": "Single / Not Married"}, {"value": 1, "label": "Married"},
+                 {"value": 2, "label": "Civil Marriage"}, {"value": 3, "label": "Widow"},
+                 {"value": 4, "label": "Separated"}]},
+    # --- Income & Loan ---
+    {"name": "AMT_INCOME_TOTAL", "label": "Annual Income ($)", "group": "Income & Loan", "type": "number", "placeholder": "e.g. 180000"},
+    {"name": "AMT_CREDIT", "label": "Loan Credit Amount ($)", "group": "Income & Loan", "type": "number", "placeholder": "e.g. 450000"},
+    {"name": "AMT_ANNUITY", "label": "Loan Annuity ($)", "group": "Income & Loan", "type": "number", "placeholder": "e.g. 20000"},
+    {"name": "AMT_GOODS_PRICE", "label": "Goods Price ($)", "group": "Income & Loan", "type": "number", "placeholder": "e.g. 450000"},
+    {"name": "NAME_INCOME_TYPE", "label": "Income Type", "group": "Income & Loan", "type": "select",
+     "options": [{"value": 0, "label": "Working"}, {"value": 1, "label": "State Servant"},
+                 {"value": 2, "label": "Commercial Associate"}, {"value": 3, "label": "Pensioner"},
+                 {"value": 4, "label": "Unemployed"}, {"value": 5, "label": "Student"}]},
+    # --- Employment ---
+    {"name": "EMPLOYED_YEARS", "label": "Years Employed", "group": "Employment", "type": "number", "placeholder": "e.g. 5"},
+    {"name": "DAYS_REGISTRATION", "label": "Days Since Registration", "group": "Employment", "type": "number", "placeholder": "e.g. -2000"},
+    {"name": "DAYS_ID_PUBLISH", "label": "Days Since ID Change", "group": "Employment", "type": "number", "placeholder": "e.g. -1000"},
+    {"name": "OCCUPATION_TYPE", "label": "Occupation Type", "group": "Employment", "type": "select",
+     "options": [{"value": 0, "label": "Laborers"}, {"value": 1, "label": "Core Staff"},
+                 {"value": 2, "label": "Accountants"}, {"value": 3, "label": "Managers"},
+                 {"value": 4, "label": "Drivers"}, {"value": 5, "label": "Sales Staff"},
+                 {"value": 6, "label": "Cleaning Staff"}, {"value": 7, "label": "Cooking Staff"},
+                 {"value": 8, "label": "Private Service Staff"}, {"value": 9, "label": "Medicine Staff"},
+                 {"value": 10, "label": "Security Staff"}, {"value": 11, "label": "High Skill Tech Staff"},
+                 {"value": 12, "label": "Waiters/Barmen"}, {"value": 13, "label": "Low-Skill Laborers"},
+                 {"value": 14, "label": "Realty Agents"}, {"value": 15, "label": "Secretaries"},
+                 {"value": 16, "label": "IT Staff"}, {"value": 17, "label": "HR Staff"}]},
+    # --- External Scores ---
+    {"name": "EXT_SOURCE_1", "label": "External Score 1", "group": "Credit Scores", "type": "number", "placeholder": "0.0 – 1.0, e.g. 0.50"},
+    {"name": "EXT_SOURCE_2", "label": "External Score 2", "group": "Credit Scores", "type": "number", "placeholder": "0.0 – 1.0, e.g. 0.60"},
+    {"name": "EXT_SOURCE_3", "label": "External Score 3", "group": "Credit Scores", "type": "number", "placeholder": "0.0 – 1.0, e.g. 0.55"},
+    # --- Bureau ---
+    {"name": "bureau_num_loans", "label": "# Bureau Loans", "group": "Bureau History", "type": "number", "placeholder": "e.g. 3"},
+    {"name": "bureau_total_debt", "label": "Total Bureau Debt ($)", "group": "Bureau History", "type": "number", "placeholder": "e.g. 50000"},
+    {"name": "bureau_total_credit", "label": "Total Bureau Credit ($)", "group": "Bureau History", "type": "number", "placeholder": "e.g. 200000"},
+    {"name": "bureau_active_loan_count", "label": "Active Bureau Loans", "group": "Bureau History", "type": "number", "placeholder": "e.g. 1"},
+    {"name": "bureau_max_overdue", "label": "Max Overdue Days", "group": "Bureau History", "type": "number", "placeholder": "e.g. 0"},
+    # --- Previous Applications ---
+    {"name": "prev_application_count", "label": "Previous Applications", "group": "Previous Apps", "type": "number", "placeholder": "e.g. 2"},
+    {"name": "prev_approved_count", "label": "Previously Approved", "group": "Previous Apps", "type": "number", "placeholder": "e.g. 1"},
+    {"name": "prev_refused_count", "label": "Previously Refused", "group": "Previous Apps", "type": "number", "placeholder": "e.g. 0"},
+    {"name": "prev_approval_rate", "label": "Approval Rate (0-1)", "group": "Previous Apps", "type": "number", "placeholder": "e.g. 0.5"},
+    # --- Installments ---
+    {"name": "installments_late_count", "label": "Late Installments", "group": "Payment History", "type": "number", "placeholder": "e.g. 0"},
+    {"name": "installments_avg_delay", "label": "Avg Payment Delay (days)", "group": "Payment History", "type": "number", "placeholder": "e.g. 0"},
+    {"name": "installments_late_pct", "label": "Late Payment %", "group": "Payment History", "type": "number", "placeholder": "e.g. 0.0"},
+    # --- Credit Card ---
+    {"name": "cc_avg_balance", "label": "Avg CC Balance ($)", "group": "Credit Card", "type": "number", "placeholder": "e.g. 5000"},
+    {"name": "cc_avg_utilization", "label": "Avg CC Utilization (0-1)", "group": "Credit Card", "type": "number", "placeholder": "e.g. 0.3"},
+    {"name": "cc_over_limit_count", "label": "Over-Limit Events", "group": "Credit Card", "type": "number", "placeholder": "e.g. 0"},
+]
+
+
+@app.route("/api/credit/model-info", methods=["GET"])
+def credit_model_info():
+    if credit_model is None:
+        return jsonify({"error": "Credit model not loaded"}), 500
+    return jsonify({
+        "model_type": "XGBClassifier (XGBoost)",
+        "feature_count": len(credit_feature_cols),
+        "threshold": credit_threshold,
+        "metrics": credit_metrics,
+        "training_data": "Home Credit Default Risk (Kaggle)",
+        "ui_fields": CREDIT_UI_FIELDS,
+    })
+
+
+@app.route("/api/credit/predict", methods=["POST"])
+def predict_credit():
+    if credit_model is None:
+        return jsonify({"error": "Credit model not loaded"}), 500
+
+    data = request.get_json(force=True)
+
+    # Build a NaN-filled row with all 146 features
+    row = {f: np.nan for f in credit_feature_cols}
+
+    # Fill in user-supplied values
+    for key, val in data.items():
+        if key in row:
+            try:
+                row[key] = float(val)
+            except (ValueError, TypeError):
+                row[key] = np.nan
+
+    df = pd.DataFrame([row], columns=credit_feature_cols)
+    prob = float(credit_model.predict_proba(df)[0][1])
+
+    # Apply the tuned threshold
+    pred = int(prob >= credit_threshold)
+
+    # Business decision tiers
+    if prob >= 0.80:
+        decision = "DECLINE"
+        risk_level = "Very High"
+    elif prob >= credit_threshold:
+        decision = "DECLINE"
+        risk_level = "High"
+    elif prob >= 0.40:
+        decision = "REVIEW"
+        risk_level = "Medium"
+    elif prob >= 0.20:
+        decision = "REVIEW"
+        risk_level = "Low-Medium"
+    else:
+        decision = "APPROVE"
+        risk_level = "Low"
+
+    return jsonify({
+        "default_probability": round(prob, 6),
+        "default_percentage": round(prob * 100, 2),
+        "prediction": pred,
+        "decision": decision,
+        "risk_level": risk_level,
+        "threshold_used": credit_threshold,
+    })
 
 
 if __name__ == "__main__":
