@@ -256,3 +256,126 @@ export default function ModelData() {
         </PageWrapper>
     )
 }
+
+function CreditModelPanel({ navigate }) {
+    const [info, setInfo] = useState(null)
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+
+    useEffect(() => {
+        fetch('http://localhost:5000/api/credit/model-info')
+            .then(r => r.json())
+            .then(data => { setInfo(data); setLoading(false) })
+            .catch(() => { setError('Failed to fetch credit model details.'); setLoading(false) })
+    }, [])
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center py-20">
+                <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+            </div>
+        )
+    }
+
+    if (error) {
+        return <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">{error}</div>
+    }
+
+    if (!info) return null
+    const { metrics } = info
+
+    return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div className="lg:col-span-1 flex flex-col gap-5">
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Architecture</p>
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Algorithm</span>
+                            <span className="text-xs text-white font-mono font-semibold">XGBoost Classifier</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Feature Dimensions</span>
+                            <span className="text-xs text-white font-mono">{info.feature_count} features</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Class Target</span>
+                            <span className="text-xs text-white font-mono">1 = Defaulted</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Training Metric</span>
+                            <span className="text-xs text-white font-mono">Max F1-Score via Optuna</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Test Set Performance</p>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                        {[
+                            { label: 'ROC-AUC', value: metrics?.roc_auc?.toFixed(4) || 'N/A' },
+                            { label: 'Opt Threshold', value: metrics?.threshold || info.threshold || 'N/A' },
+                            { label: 'Precision', value: metrics?.precision_class1?.toFixed(3) || 'N/A' },
+                            { label: 'Recall', value: metrics?.recall_class1?.toFixed(3) || 'N/A' },
+                        ].map(s => (
+                            <div key={s.label} className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 flex flex-col items-center justify-center gap-1">
+                                <p className="text-[10px] text-neutral-500 uppercase tracking-widest leading-tight">{s.label}</p>
+                                <p className="text-base font-extrabold text-white font-mono">{s.value}</p>
+                            </div>
+                        ))}
+                    </div>
+                    {metrics?.confusion_matrix && (
+                        <div>
+                            <p className="text-[10px] text-neutral-500 uppercase tracking-widest mb-2 border-b border-neutral-800 pb-2">Confusion Matrix (Threshold: {info.threshold})</p>
+                            <div className="grid grid-cols-2 gap-1 text-center text-xs font-mono">
+                                <div className="bg-emerald-500/10 text-emerald-400 p-2 rounded-tl-lg">TN: {metrics.confusion_matrix[0][0]}</div>
+                                <div className="bg-red-500/10 text-red-500 p-2 rounded-tr-lg">FP: {metrics.confusion_matrix[0][1]}</div>
+                                <div className="bg-red-500/10 text-red-500 p-2 rounded-bl-lg">FN: {metrics.confusion_matrix[1][0]}</div>
+                                <div className="bg-emerald-500/10 text-emerald-400 p-2 rounded-br-lg">TP: {metrics.confusion_matrix[1][1]}</div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="lg:col-span-2">
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 h-full flex flex-col">
+                    <h3 className="text-lg font-bold text-white mb-2">Home Credit Default Risk Model</h3>
+                    <p className="text-sm text-neutral-400 mb-6">
+                        This XGBoost model was trained on ~307,000 application records to predict applicants' abilities to repay loans. It leverages
+                        <span className="text-white font-mono"> {info.feature_count} </span> features, spanning an extreme imbalance (only ~8% defaults).
+                        To counteract this, probability thresholds were dynamically shifted using Optuna over 5-fold cross-validation,
+                        maximising the F1 score for the minority "Default" class.
+                    </p>
+
+                    <div className="grid sm:grid-cols-2 gap-4 mb-auto">
+                        <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4">
+                            <p className="text-xs font-bold text-neutral-500 uppercase mb-2">Feature Strategy</p>
+                            <ul className="text-sm text-neutral-400 space-y-2 list-disc pl-4 marker:text-neutral-700">
+                                <li>Heavy reliance on <code className="text-white bg-black px-1 rounded">EXT_SOURCE_1-3</code> normalised external bureau scores.</li>
+                                <li>Custom polynomial and ratio combinations (e.g. Credit-to-Income, Annuity-to-Income).</li>
+                                <li>Historical installment ratios and delays aggregated over time.</li>
+                            </ul>
+                        </div>
+                        <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4">
+                            <p className="text-xs font-bold text-neutral-500 uppercase mb-2">Imbalance Treatment</p>
+                            <ul className="text-sm text-neutral-400 space-y-2 list-disc pl-4 marker:text-neutral-700">
+                                <li>Scale_pos_weight is bypassed in favor of raw probability tuning via a dynamic threshold (<code className="text-white bg-black px-1 rounded">{info.threshold}</code>).</li>
+                                <li>Missing fields are retained optimally as native NaNs handled by XGBoost splitting directions.</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div className="mt-8 border-t border-neutral-800 pt-6">
+                        <button
+                            onClick={() => navigate('/credit-test')}
+                            className="bg-white text-black font-semibold py-3 px-6 rounded-lg text-sm hover:bg-neutral-200 transition-colors w-full sm:w-auto"
+                        >
+                            Test Credit Model Live
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
