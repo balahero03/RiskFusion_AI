@@ -46,7 +46,7 @@ def check_prereqs():
     node_modules = os.path.join(FRONTEND_DIR, "node_modules")
     if not os.path.isdir(node_modules):
         print("📦  Installing frontend dependencies...")
-        subprocess.run(["npm", "install"], cwd=FRONTEND_DIR, shell=True, check=True)
+        subprocess.run("npm install", cwd=FRONTEND_DIR, shell=True, check=True)
         print()
 
     # Quick check that flask is importable
@@ -81,7 +81,7 @@ def main():
     # --- Start Vite frontend ---
     print("🚀  Starting Vite frontend  →  http://localhost:5173")
     frontend = subprocess.Popen(
-        ["npm", "run", "dev"],
+        "npm run dev",
         cwd=FRONTEND_DIR,
         shell=True,
     )

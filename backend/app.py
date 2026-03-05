@@ -19,8 +19,7 @@ BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH    = os.path.join(BASE_DIR, "fraud_model",  "fraud_xgboost.pkl")
 DATA_PATH     = os.path.join(BASE_DIR, "fraud_model",  "processed_train.csv")
 CONFUSION_IMG = os.path.join(BASE_DIR, "fraud_model",  "confusion_matrix.png")
-CREDIT_MODEL_PATH    = os.path.join(BASE_DIR, "credit_model", "credit_xgb_model.joblib")
-CREDIT_PIPELINE_PATH = os.path.join(BASE_DIR, "credit_model", "preprocessing_pipeline.joblib")
+CREDIT_MODEL_PATH = os.path.join(BASE_DIR, "credit_model", "credit_fusion_model.joblib")
 CUSTOMERS_PATH = os.path.join(BASE_DIR, "..", "data", "customers.csv")
 
 OCCUPATION_LABELS = {
@@ -59,18 +58,20 @@ load_model()
 
 # ---------- Credit model ----------
 credit_model = None
+credit_explainer = None
 credit_feature_cols = []
 credit_threshold = 0.69
 credit_metrics = {}
 
 def load_credit_model():
-    global credit_model, credit_feature_cols, credit_threshold, credit_metrics
+    global credit_model, credit_explainer, credit_feature_cols, credit_threshold, credit_metrics
     try:
-        credit_model = _load_joblib(CREDIT_MODEL_PATH)
-        meta = _load_joblib(CREDIT_PIPELINE_PATH)
-        credit_feature_cols = list(meta.get("feature_cols", []))
-        credit_threshold = float(meta.get("best_threshold", 0.69))
-        credit_metrics = meta.get("metrics", {})
+        fusion_bundle = _load_joblib(CREDIT_MODEL_PATH)
+        credit_model = fusion_bundle.get('model')
+        credit_explainer = fusion_bundle.get('explainer')
+        credit_feature_cols = list(fusion_bundle.get("feature_cols", []))
+        credit_threshold = float(fusion_bundle.get("best_threshold", 0.69))
+        credit_metrics = fusion_bundle.get("metrics", {})
         print(f"Credit model loaded: {len(credit_feature_cols)} features, threshold={credit_threshold}")
     except Exception as e:
         print(f"Failed to load credit model: {e}")
@@ -198,6 +199,7 @@ def predict_fraud():
     return jsonify({
         "fraud_probability": round(prob, 6),
         "fraud_percentage": round(prob * 100, 2),
+        "credit_percentage": round(prob * 100, 2), # Alias for consistency
         "prediction": pred,
         "decision": decision,
         "risk_level": risk_level,
@@ -422,6 +424,7 @@ def predict_credit():
     return jsonify({
         "default_probability": round(prob, 6),
         "default_percentage": round(prob * 100, 2),
+        "credit_percentage": round(prob * 100, 2), # Alias
         "prediction": pred,
         "decision": decision,
         "risk_level": risk_level,
@@ -498,7 +501,12 @@ def predict_fusion():
     credit_df = pd.DataFrame([credit_row], columns=credit_feature_cols)
     credit_prob = float(credit_model.predict_proba(credit_df)[0][1])
 
-    # --- Loss-Aware Fusion ---
+    # --- Weighted Fusion (Standard) ---
+    w_credit = weights.get("credit", 0.5)
+    w_fraud = weights.get("fraud", 0.5)
+    fusion_score = (credit_prob * w_credit) + (fraud_prob * w_fraud)
+
+    # --- Loss-Aware Fusion (Advanced Metric) ---
     LGD         = 0.6
     txn_amount  = float(data.get("TransactionAmt", 0) or 0)
     loan_amount = float(data.get("AMT_CREDIT", 0) or 0)
@@ -508,18 +516,28 @@ def predict_fusion():
     exposure    = max(loan_amount + txn_amount, 1)
     risk_ratio  = total_risk / exposure
 
-    if risk_ratio < 0.10:
+    # Decision based on Weighted Fusion (5-tier)
+    if fusion_score < 0.20:
         decision, risk_level = "APPROVE", "Low"
-    elif risk_ratio < 0.25:
+    elif fusion_score < 0.38:
+        decision, risk_level = "REVIEW",  "Low-Medium"
+    elif fusion_score < 0.55:
         decision, risk_level = "REVIEW",  "Medium"
-    else:
+    elif fusion_score < 0.72:
         decision, risk_level = "REJECT",  "High"
+    else:
+        decision, risk_level = "REJECT",  "Very High"
 
     return jsonify({
         "fraud_probability":  round(fraud_prob, 6),
         "fraud_percentage":   round(fraud_prob * 100, 2),
         "credit_probability": round(credit_prob, 6),
         "credit_percentage":  round(credit_prob * 100, 2),
+        "fusion_score":       round(fusion_score, 4),
+        "final_trust_score":  round(fusion_score, 4),
+        "fusion_percentage":  round(fusion_score * 100, 2),
+        "fraud_weight":       w_fraud,
+        "credit_weight":      w_credit,
         "fraud_risk":         round(fraud_risk, 2),
         "credit_risk":        round(credit_risk, 2),
         "total_risk":         round(total_risk, 2),
@@ -656,7 +674,11 @@ def demo_assess():
         "card6":          float(r.card_type),
         "ProductCD":      float(r.product_code),
         "DeviceType":     float(r.device_type),
-        "AMT_INCOME_TOTAL": float(r.income),   # some V-features correlate
+        "C1":             float(r.C1),
+        "C2":             float(r.C2),
+        "C4":             float(r.C4),
+        "C8":             float(r.C8),
+        "D1":             float(r.D1),
     }
     for k, v in fraud_map.items():
         if k in fraud_row:
@@ -664,7 +686,12 @@ def demo_assess():
     fraud_df  = pd.DataFrame([fraud_row], columns=feature_names)
     fraud_prob= float(model.predict_proba(fraud_df)[0][1])
 
-    # ── Loss-Aware Fusion ─────────────────────────────────
+    # --- Weighted Fusion (Standard) ---
+    w_credit = weights.get("credit", 0.5)
+    w_fraud = weights.get("fraud", 0.5)
+    fusion_score = (credit_prob * w_credit) + (fraud_prob * w_fraud)
+
+    # --- Loss-Aware Fusion (Advanced Metric) ---
     LGD          = 0.6
     txn_amount   = float(r.last_transaction_amt)
     loan_amount  = float(r.loan_amount)
@@ -674,18 +701,51 @@ def demo_assess():
     exposure     = max(loan_amount + txn_amount, 1)
     risk_ratio   = total_risk / exposure
 
-    if risk_ratio < 0.10:
+    # Decision based on Weighted Fusion (5-tier)
+    if fusion_score < 0.20:
         decision, risk_level = "APPROVE", "Low"
-    elif risk_ratio < 0.25:
+    elif fusion_score < 0.38:
+        decision, risk_level = "REVIEW",  "Low-Medium"
+    elif fusion_score < 0.55:
         decision, risk_level = "REVIEW",  "Medium"
-    else:
+    elif fusion_score < 0.72:
         decision, risk_level = "REJECT",  "High"
+    else:
+        decision, risk_level = "REJECT",  "Very High"
+
+    # ── Explainability (SHAP) ─────────────────────────────
+    factors = []
+    if credit_explainer is not None:
+        try:
+            shap_vals = credit_explainer.shap_values(credit_df)
+            if isinstance(shap_vals, list):
+                shap_vals = shap_vals[1]  # positive class
+            
+            # Format top and bottom features
+            vals = shap_vals[0]
+            feature_imp = [(credit_feature_cols[i], float(vals[i])) for i in range(len(credit_feature_cols))]
+            feature_imp.sort(key=lambda x: x[1], reverse=True)
+            
+            top_positive = [{"feature": f, "impact": round(v, 4)} for f, v in feature_imp[:3] if v > 0]
+            top_negative = [{"feature": f, "impact": round(v, 4)} for f, v in reversed(feature_imp[-3:]) if v < 0]
+            
+            for item in top_positive:
+                factors.append({"severity": "high", "label": f"Risk Increased by {item['feature']}", "detail": f"+{item['impact']}"})
+            for item in top_negative:
+                factors.append({"severity": "low", "label": f"Risk Decreased by {item['feature']}", "detail": f"{item['impact']}"})
+        except Exception as e:
+            print(f"SHAP Explainer Error: {e}")
 
     return jsonify({
         "fraud_probability":  round(fraud_prob, 6),
         "fraud_percentage":   round(fraud_prob * 100, 2),
         "credit_probability": round(credit_prob, 6),
         "credit_percentage":  round(credit_prob * 100, 2),
+        "fusion_score":       round(fusion_score, 4),
+        "final_trust_score":  round(fusion_score, 4),
+        "fusion_percentage":  round(fusion_score * 100, 2),
+        "fraud_weight":       w_fraud,
+        "credit_weight":      w_credit,
         "fraud_risk":         round(fraud_risk, 2),
         "credit_risk":        round(credit_risk, 2),
         "total_risk":         round(total_risk, 2),
