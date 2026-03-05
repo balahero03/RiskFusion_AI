@@ -715,6 +715,9 @@ def demo_assess():
 
     # ── Explainability (SHAP) ─────────────────────────────
     factors = []
+    shap_detailed = [] # For full waterfall chart
+    shap_base_val = None
+    
     if credit_explainer is not None:
         try:
             shap_vals = credit_explainer.shap_values(credit_df)
@@ -733,6 +736,24 @@ def demo_assess():
                 factors.append({"severity": "high", "label": f"Risk Increased by {item['feature']}", "detail": f"+{item['impact']}"})
             for item in top_negative:
                 factors.append({"severity": "low", "label": f"Risk Decreased by {item['feature']}", "detail": f"{item['impact']}"})
+                
+            # Full detailed SHAP list (top 15 absolute) for visual panel
+            detailed_imp = sorted(feature_imp, key=lambda x: abs(x[1]), reverse=True)
+            for feat, val in detailed_imp[:15]:
+                shap_detailed.append({
+                    "feature": feat,
+                    "value": round(val, 5),
+                    "direction": "risk_increase" if val > 0 else "risk_decrease",
+                })
+                
+            # Try to get base value
+            if hasattr(credit_explainer, "expected_value"):
+                ev = credit_explainer.expected_value
+                if isinstance(ev, (list, np.ndarray)):
+                    shap_base_val = round(float(ev[1]), 5)
+                else:
+                    shap_base_val = round(float(ev), 5)
+                    
         except Exception as e:
             print(f"SHAP Explainer Error: {e}")
 
@@ -759,8 +780,234 @@ def demo_assess():
         "decision":           decision,
         "risk_level":         risk_level,
         "risk_factors":       factors,
+        "shap_detailed":      shap_detailed,
+        "shap_base_val":      shap_base_val,
         "customer_name":      r["name"],
     })
+
+
+
+# ── In-memory cache so SHAP is computed only once per context ──────────────
+_classified_cache = {}
+
+
+@app.route("/api/demo/customers/classified", methods=["GET"])
+def customers_classified():
+    """
+    Batch-score every customer through the Fusion model.
+    FAST: all predictions and SHAP run on the full batch at once.
+    Results cached in memory per context.
+    """
+    if model is None or credit_model is None:
+        return jsonify({"error": "One or more models not loaded"}), 500
+
+    context  = request.args.get("context", "loan")
+
+    # ── Return cached result if available ─────────────────────────────────
+    if context in _classified_cache:
+        return jsonify(_classified_cache[context])
+
+    try:
+        df = _load_customers()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    weights  = FUSION_WEIGHTS.get(context, FUSION_WEIGHTS["loan"])
+    w_credit = weights["credit"]
+    w_fraud  = weights["fraud"]
+    FUSION_THRESHOLD = 0.38
+
+    n = len(df)
+
+    # ══ 1. Build all credit rows at once ════════════════════════════════════
+    credit_rows = []
+    for _, r in df.iterrows():
+        row = {f: np.nan for f in credit_feature_cols}
+        mapping = {
+            "AMT_INCOME_TOTAL":        float(r.income),
+            "AMT_CREDIT":              float(r.loan_amount),
+            "AMT_ANNUITY":             float(r.annuity),
+            "AMT_GOODS_PRICE":         float(r.goods_price),
+            "AGE_YEARS":               float(r.age),
+            "EMPLOYED_YEARS":          float(r.employment_years),
+            "CODE_GENDER":             float(r.gender),
+            "FLAG_OWN_CAR":            float(r.owns_car),
+            "FLAG_OWN_REALTY":         float(r.owns_realty),
+            "CNT_CHILDREN":            float(r.children),
+            "CNT_FAM_MEMBERS":         float(r.family_members),
+            "NAME_EDUCATION_TYPE":     float(r.education),
+            "NAME_FAMILY_STATUS":      float(r.family_status),
+            "NAME_INCOME_TYPE":        float(r.income_type),
+            "OCCUPATION_TYPE":         float(r.occupation_type),
+            "DAYS_REGISTRATION":       float(r.days_registration),
+            "DAYS_ID_PUBLISH":         float(r.days_id_publish),
+            "EXT_SOURCE_1":            float(r.ext_score_1),
+            "EXT_SOURCE_2":            float(r.ext_score_2),
+            "EXT_SOURCE_3":            float(r.ext_score_3),
+            "bureau_num_loans":        float(r.bureau_loans),
+            "bureau_total_debt":       float(r.bureau_debt),
+            "bureau_total_credit":     float(r.bureau_credit),
+            "bureau_active_loan_count":float(r.bureau_active_loans),
+            "bureau_max_overdue":      float(r.bureau_max_overdue),
+            "prev_application_count":  float(r.prev_applications),
+            "prev_approved_count":     float(r.prev_approved),
+            "prev_refused_count":      float(r.prev_refused),
+            "prev_approval_rate":      float(r.approval_rate),
+            "installments_late_count": float(r.late_installments),
+            "installments_avg_delay":  float(r.avg_delay),
+            "installments_late_pct":   float(r.late_pct),
+            "cc_avg_balance":          float(r.cc_balance),
+            "cc_avg_utilization":      float(r.cc_utilization),
+            "cc_over_limit_count":     float(r.cc_over_limit),
+        }
+        for k, v in mapping.items():
+            if k in row:
+                row[k] = v
+        credit_rows.append(row)
+
+    all_credit_df = pd.DataFrame(credit_rows, columns=credit_feature_cols)
+
+    # ══ 2. Credit model — single batch predict_proba ═════════════════════
+    credit_probs = credit_model.predict_proba(all_credit_df)[:, 1]  # shape (25,)
+
+    # ══ 3. SHAP — single batch call ═══════════════════════════════════════
+    shap_base_value = None
+    all_shap = None      # shape (25, n_features) or None
+    if credit_explainer is not None:
+        try:
+            sv = credit_explainer.shap_values(all_credit_df)
+            if isinstance(sv, list):
+                sv = sv[1]              # positive class — shape (25, n_features)
+            all_shap = sv               # numpy array (25, n_features)
+            if hasattr(credit_explainer, "expected_value"):
+                ev = credit_explainer.expected_value
+                if isinstance(ev, (list, np.ndarray)):
+                    shap_base_value = round(float(ev[1]), 5)
+                else:
+                    shap_base_value = round(float(ev), 5)
+        except Exception as ex:
+            print(f"Batch SHAP error: {ex}")
+
+    # ══ 4. Build all fraud rows — single batch predict ════════════════════
+    fraud_rows = []
+    for _, r in df.iterrows():
+        row = {f: -999 for f in feature_names}
+        for k, v in {
+            "TransactionAmt": float(r.last_transaction_amt),
+            "card4":          float(r.card_brand),
+            "card6":          float(r.card_type),
+            "ProductCD":      float(r.product_code),
+            "DeviceType":     float(r.device_type),
+            "C1":             float(r.C1),
+            "C2":             float(r.C2),
+            "C4":             float(r.C4),
+            "C8":             float(r.C8),
+            "D1":             float(r.D1),
+        }.items():
+            if k in row:
+                row[k] = v
+        fraud_rows.append(row)
+
+    all_fraud_df  = pd.DataFrame(fraud_rows, columns=feature_names)
+    fraud_probs   = model.predict_proba(all_fraud_df)[:, 1]   # shape (25,)
+
+    # ══ 5. Assemble records ═══════════════════════════════════════════════
+    low_risk  = []
+    high_risk = []
+
+    for i, (_, r) in enumerate(df.iterrows()):
+        credit_prob  = float(credit_probs[i])
+        fraud_prob   = float(fraud_probs[i])
+        fusion_score = (credit_prob * w_credit) + (fraud_prob * w_fraud)
+
+        # Decision
+        if fusion_score < 0.20:
+            decision, risk_level = "APPROVE", "Low"
+        elif fusion_score < 0.38:
+            decision, risk_level = "REVIEW",  "Low-Medium"
+        elif fusion_score < 0.55:
+            decision, risk_level = "REVIEW",  "Medium"
+        elif fusion_score < 0.72:
+            decision, risk_level = "REJECT",  "High"
+        else:
+            decision, risk_level = "REJECT",  "Very High"
+
+        # SHAP for this customer
+        shap_vals_list = []
+        if all_shap is not None:
+            raw = all_shap[i]
+            shap_pairs = [
+                (credit_feature_cols[j], float(raw[j]))
+                for j in range(len(credit_feature_cols))
+            ]
+            shap_pairs.sort(key=lambda x: abs(x[1]), reverse=True)
+            for feat, val in shap_pairs[:10]:
+                shap_vals_list.append({
+                    "feature":   feat,
+                    "value":     round(val, 5),
+                    "direction": "risk_increase" if val > 0 else "risk_decrease",
+                })
+
+        ext_avg = round(
+            (float(r.ext_score_1) + float(r.ext_score_2) + float(r.ext_score_3)) / 3, 3
+        )
+        record = {
+            "customer_id":        r.customer_id,
+            "name":               r["name"],
+            "account_number":     r.account_number,
+            "account_type":       r.account_type,
+            "bank_name":          r.bank_name,
+            "age":                int(r.age),
+            "gender":             "Male" if int(r.gender) == 1 else "Female",
+            "income":             float(r.income),
+            "loan_amount":        float(r.loan_amount),
+            "employment_years":   float(r.employment_years),
+            "education":          EDUCATION_LABELS.get(int(r.education), str(r.education)),
+            "occupation":         OCCUPATION_LABELS.get(int(r.occupation_type), str(r.occupation_type)),
+            "ext_score_avg":      ext_avg,
+            "bureau_max_overdue": int(r.bureau_max_overdue),
+            "late_installments":  int(r.late_installments),
+            "cc_utilization":     float(r.cc_utilization),
+            "last_transaction":   float(r.last_transaction_amt),
+            # scores
+            "fraud_probability":  round(fraud_prob, 5),
+            "fraud_percentage":   round(fraud_prob * 100, 2),
+            "credit_probability": round(credit_prob, 5),
+            "credit_percentage":  round(credit_prob * 100, 2),
+            "fusion_score":       round(fusion_score, 5),
+            "fusion_percentage":  round(fusion_score * 100, 2),
+            "fraud_weight":       w_fraud,
+            "credit_weight":      w_credit,
+            "decision":           decision,
+            "risk_level":         risk_level,
+            "fusion_category":    "Low" if fusion_score < FUSION_THRESHOLD else "High",
+            # SHAP
+            "shap_values":        shap_vals_list,
+            "shap_base_value":    shap_base_value,
+        }
+
+        if fusion_score < FUSION_THRESHOLD:
+            low_risk.append(record)
+        else:
+            high_risk.append(record)
+
+    low_risk.sort(key=lambda x:  x["fusion_score"])
+    high_risk.sort(key=lambda x: x["fusion_score"], reverse=True)
+
+    result = {
+        "context":          context,
+        "fusion_threshold": FUSION_THRESHOLD,
+        "weights":          {"credit": w_credit, "fraud": w_fraud},
+        "total_customers":  n,
+        "low_risk_count":   len(low_risk),
+        "high_risk_count":  len(high_risk),
+        "low_risk":         low_risk,
+        "high_risk":        high_risk,
+    }
+
+    # Cache result for subsequent requests
+    _classified_cache[context] = result
+    return jsonify(result)
 
 
 if __name__ == "__main__":

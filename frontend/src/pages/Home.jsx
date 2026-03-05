@@ -28,7 +28,8 @@ export default function Home() {
                         <button onClick={() => navigate('/fusion-test')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Fusion Test</button>
                         <button onClick={() => navigate('/model-data')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Model Data</button>
                         <button onClick={() => navigate('/dashboard')} className="text-xs text-white bg-white/10 px-3 py-1.5 rounded-md font-medium">Dashboard</button>
-                        <button onClick={() => navigate('/demo')} className="text-xs text-black bg-white px-3 py-1.5 rounded-md font-bold ml-1">🎯 Demo</button>
+                        <button onClick={() => navigate('/demo')} className="text-xs text-neutral-500 hover:text-white px-3 py-1.5 rounded-md transition-colors">Demo</button>
+                        <button onClick={() => navigate('/classify')} className="text-xs text-black bg-violet-400 px-3 py-1.5 rounded-md font-bold ml-1">🔬 Classify</button>
                     </div>
                 </nav>
 
@@ -79,6 +80,15 @@ export default function Home() {
                             className="btn-secondary text-base px-6 py-4"
                         >
                             Test Fraud Model
+                        </button>
+                        <button
+                            id="classify-btn"
+                            onClick={() => navigate('/classify')}
+                            className="text-sm font-bold px-8 py-4 rounded-xl transition-all flex items-center gap-2"
+                            style={{ background: 'linear-gradient(135deg, #7c3aed, #a78bfa)', color: '#fff' }}
+                        >
+                            🔬 Customer Classification
+                            <span className="text-xs font-normal opacity-80 bg-white/10 px-2 py-0.5 rounded-full">+ SHAP</span>
                         </button>
                     </div>
 

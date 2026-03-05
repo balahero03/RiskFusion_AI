@@ -8,6 +8,7 @@ import ModelData from './pages/ModelData'
 import CreditTest from './pages/CreditTest'
 import FusionTest from './pages/FusionTest'
 import DemoMode from './pages/DemoMode'
+import CustomerClassification from './pages/CustomerClassification'
 
 function AnimatedRoutes() {
     const location = useLocation()
@@ -22,6 +23,7 @@ function AnimatedRoutes() {
                 <Route path="/credit-test" element={<CreditTest />} />
                 <Route path="/fusion-test" element={<FusionTest />} />
                 <Route path="/demo" element={<DemoMode />} />
+                <Route path="/classify" element={<CustomerClassification />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
         </AnimatePresence>
